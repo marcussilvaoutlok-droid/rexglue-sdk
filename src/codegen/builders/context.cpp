@@ -285,9 +285,19 @@ void BuilderContext::emit_conditional_branch(bool not_, std::string_view cond) {
 
   switch (kind) {
     case TargetKind::InternalLabel:
-      // Target is within this function - local goto
-      println("\tif ({}{}.{}) goto loc_{:08X};", not_ ? "!" : "", cr(insn.operands[0]), cond,
-              target);
+      // Only branch to labels that code generation will actually emit. Function
+      // extents may include gaps, so a classified internal target can be absent.
+      if (fn.isLabel(target)) {
+        println("\tif ({}{}.{}) goto loc_{:08X};", not_ ? "!" : "", cr(insn.operands[0]), cond,
+                target);
+      } else {
+        REXCODEGEN_WARN("Unresolved conditional branch target 0x{:08X} from 0x{:08X}", target,
+                        base);
+        println("\tif ({}{}.{}) {{", not_ ? "!" : "", cr(insn.operands[0]), cond);
+        emit_function_call(target);
+        println("\t\treturn;");
+        println("\t}}");
+      }
       break;
 
     case TargetKind::Function:
