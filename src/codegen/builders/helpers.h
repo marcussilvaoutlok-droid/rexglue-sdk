@@ -387,9 +387,9 @@ inline bool isMMIOUpperBits(uint32_t imm) {
  */
 inline void emitBranchWithBoundsCheck(BuilderContext& ctx, uint32_t target,
                                       std::string_view condition, std::string_view instr_name) {
-  // A function's address extent can include gaps where codegen emits no loc_* label.
-  // Only branch to addresses that the function scanner actually discovered.
-  if (ctx.fn.containsAddress(target)) {
+  // Function bounds may contain gaps between discovered blocks. A goto is valid
+  // only when code generation will emit the exact target label.
+  if (ctx.fn.isLabel(target)) {
     ctx.println("\tif ({}) goto loc_{:X};", condition, target);
   } else {
     REXCODEGEN_WARN("{} at {:X} branches to undiscovered address {:X}", instr_name, ctx.base,
