@@ -33,8 +33,14 @@ bool build_b(BuilderContext& ctx) {
 
   switch (kind) {
     case TargetKind::InternalLabel:
-      // Target is within this function and not another function's entry point
-      ctx.println("\tgoto loc_{:X};", target);
+      // Only emit a goto when codegen will emit the exact target label.
+      if (ctx.fn.isLabel(target)) {
+        ctx.println("\tgoto loc_{:X};", target);
+      } else {
+        REXCODEGEN_WARN("Unresolved b target 0x{:08X} from 0x{:08X}", target, ctx.base);
+        ctx.emit_function_call(target);
+        ctx.println("\treturn;");
+      }
       break;
 
     case TargetKind::Function:
