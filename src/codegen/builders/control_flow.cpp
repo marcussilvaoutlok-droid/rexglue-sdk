@@ -78,9 +78,15 @@ bool build_bl(BuilderContext& ctx) {
 
   switch (kind) {
     case TargetKind::InternalLabel:
-      // PIC code pattern - bl to get PC into LR, treat as local jump
-      // LR is already set above, now jump to the target
-      ctx.println("\tgoto loc_{:X};", target);
+      // PIC code pattern - bl to get PC into LR, treat as local jump.
+      // Avoid emitting a goto to a label absent from generated code.
+      if (ctx.fn.isLabel(target)) {
+        ctx.println("\tgoto loc_{:X};", target);
+      } else {
+        REXCODEGEN_WARN("Unresolved local bl target 0x{:08X} from 0x{:08X}", target, ctx.base);
+        ctx.emit_function_call(target);
+        ctx.csrState = CSRState::Unknown;
+      }
       break;
 
     case TargetKind::Function:
@@ -148,7 +154,14 @@ bool build_bctr(BuilderContext& ctx) {
       auto kind = ctx.graph().classifyTarget(label, ctx.base, false);
       switch (kind) {
         case TargetKind::InternalLabel:
-          ctx.println("\t\tgoto loc_{:X};", label);
+          if (ctx.fn.isLabel(label)) {
+            ctx.println("\t\tgoto loc_{:X};", label);
+          } else {
+            REXCODEGEN_ERROR("Jump target 0x{:08X} has no emitted label at bctr 0x{:08X}",
+                             label, ctx.base);
+            ctx.println("\t\tREX_FATAL(\"Jump target 0x{:08X} has no emitted label at bctr "
+                        "0x{:08X}\");", label, ctx.base);
+          }
           break;
         case TargetKind::Function:
         case TargetKind::Import:
