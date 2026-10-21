@@ -242,6 +242,31 @@ jobs:
           echo "=== Compilando biblioteca Android ==="
           cmake --build build-android --config Release
 
+      - name: Validar e preparar biblioteca nativa Android ARM64
+        run: |
+          set -euo pipefail
+          LIB="pacman_project/build-android/libpacman_colors.so"
+          test -s "$LIB"
+          mkdir -p dist/android-arm64
+          file "$LIB" | tee dist/android-arm64/file.txt
+          readelf -h "$LIB" | tee dist/android-arm64/elf-header.txt
+          readelf -d "$LIB" | tee dist/android-arm64/elf-dependencies.txt
+          readelf -h "$LIB" | grep -q 'Machine:.*AArch64'
+          cp "$LIB" dist/android-arm64/
+          cat > dist/android-arm64/README.txt <<'EOF'
+          Pac-Man ReXGlue Android ARM64 native shared library.
+          This is a native .so build artifact, not a standalone installable APK.
+          An Android application wrapper and runtime dependency packaging are still required.
+          EOF
+
+      - name: Publicar biblioteca nativa Android ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacman-android-arm64-native
+          path: dist/android-arm64/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Preparar diagnosticos compactos
         if: always()
         run: |
