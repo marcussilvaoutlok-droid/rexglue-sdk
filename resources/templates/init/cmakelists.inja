@@ -19,6 +19,8 @@ if(ANDROID)
     # Android native code is loaded as a shared library; Android does not use
     # a desktop executable entry point (main).
     add_library({{ names.snake_case }} SHARED {{ cmake_var(names.upper_case + "_SOURCES") }})
+    target_compile_definitions({{ names.snake_case }} PRIVATE
+        REXGLUE_APP_NAME=\"{{ names.snake_case }}\")
 elseif(WIN32)
     add_executable({{ names.snake_case }} WIN32 {{ cmake_var(names.upper_case + "_SOURCES") }})
 else()
