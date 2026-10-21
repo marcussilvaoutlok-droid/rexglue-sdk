@@ -19,6 +19,9 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+
+// The desktop SDL entry point is not used by Android library builds.
+#if !REX_PLATFORM_ANDROID
 #include <rex/ui/windowed_app.h>
 #include <rex/ui/windowed_app_context_sdl.h>
 
@@ -131,3 +134,4 @@ int main(int argc, char* argv[]) {
 }
 
 #endif
+#endif  // !REX_PLATFORM_ANDROID
