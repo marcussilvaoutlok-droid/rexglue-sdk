@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - fix/missing-label-check
 
 permissions:
   contents: read
