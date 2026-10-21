@@ -157,11 +157,8 @@ bool build_bctr(BuilderContext& ctx) {
           if (ctx.fn.isLabel(label)) {
             ctx.println("\t\tgoto loc_{:X};", label);
           } else {
-            REXCODEGEN_ERROR(
-                "Jump target 0x{:08X} has no emitted label at bctr 0x{:08X}", label, ctx.base);
-            ctx.println(
-                "\t\tREX_FATAL(\"Jump target 0x{:08X} has no emitted label at bctr 0x{:08X}\");",
-                label, ctx.base);
+            REXCODEGEN_ERROR("Missing jump label at bctr 0x{:08X}", ctx.base);
+            ctx.println("\t\tREX_FATAL(\"Missing jump label at bctr 0x{:08X}\");", ctx.base);
           }
           break;
         case TargetKind::Function:
