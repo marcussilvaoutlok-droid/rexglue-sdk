@@ -118,7 +118,7 @@ std::vector<std::string> WideArgsToUtf8(int argc, wchar_t** wargv) {
 #if REX_PLATFORM_ANDROID
 
 // SDL's Android activity calls SDL_main after loading the native application library.
-int SDL_main(int argc, char* argv[]) {
+extern "C" int SDL_main(int argc, char* argv[]) {
   return RunWindowedApp(argc, argv);
 }
 
