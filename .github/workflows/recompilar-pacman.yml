@@ -266,7 +266,7 @@ jobs:
           git clone --depth 1 --branch release-3.4.x https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
           mkdir -p android-package
           cp -a "$RUNNER_TEMP/SDL/android-project/." android-package/
-          mkdir -p android-package/app/libs/arm64-v8a
+          mkdir -p android-package/app/src/main/jniLibs/arm64-v8a
           cp pacman_project/build-android/libpacman_colors.so android-package/app/libs/arm64-v8a/libmain.so
           # SDLActivity loads SDL3 followed by the app's libmain.so. The
           # native CMake build must provide a shared SDL3 runtime when linked dynamically.
