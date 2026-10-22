@@ -22,6 +22,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Configurar Android SDK e NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar NDK
+        run: |
+          set -euo pipefail
+          sdkmanager "ndk;27.2.12479018"
+          NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+          test -f "$NDK_PATH/build/cmake/android.toolchain.cmake"
+          echo "ANDROID_NDK_LATEST_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+
       - name: Instalar dependencias
         run: |
           sudo apt-get update
@@ -102,22 +114,20 @@ jobs:
           find out -type f -name rexglue \
             -perm /111 -print || true
 
-          if [ -x "out/linux-amd64/Release/rexglue" ]; then
-            REXGLUE_BIN="$GITHUB_WORKSPACE/out/linux-amd64/Release/rexglue"
-          elif [ -x "out/linux-amd64/rexglue" ]; then
-            REXGLUE_BIN="$GITHUB_WORKSPACE/out/linux-amd64/rexglue"
-          else
-            echo "::error::Executavel rexglue x86-64 nao encontrado em out/linux-amd64."
-            echo "Arquivos encontrados:"
-            find out/linux-amd64 -type f -name rexglue -print 2>/dev/null || true
+          # Find the actual executable produced by the preset; do not assume
+          # a single output layout across Ninja Multi-Config versions.
+          REXGLUE_SOURCE="$(find out -type f -name rexglue -perm /111 -print -quit)"
+          if [ -z "$REXGLUE_SOURCE" ]; then
+            echo "::error::Executavel ReXGlue host nao encontrado."
+            find out -type f -name 'rexglue*' -print || true
             exit 1
           fi
 
-          # Guarde a ferramenta host fora do workspace para que o CMake Android
-          # nao possa sobrescreve-la ao compilar o alvo rexglue.
-          REXGLUE_BIN="$RUNNER_TEMP/rexglue-host"
-          cp "$GITHUB_WORKSPACE/out/linux-amd64/Release/rexglue" "$REXGLUE_BIN" 2>/dev/null || cp "$GITHUB_WORKSPACE/out/linux-amd64/rexglue" "$REXGLUE_BIN"
-          chmod +x "$REXGLUE_BIN"
+          # Keep a native host executable outside the SDK build tree.
+          REXGLUE_BIN="$RUNNER_TEMP/rexglue-host-linux"
+          install -m 0755 "$REXGLUE_SOURCE" "$REXGLUE_BIN"
+          file "$REXGLUE_BIN"
+          "$REXGLUE_BIN" --help
           echo "REXGLUE_BIN=$REXGLUE_BIN" >> "$GITHUB_ENV"
 
           echo "=== Versao e ajuda do ReXGlue (host x86-64) ==="
@@ -267,12 +277,12 @@ jobs:
           mkdir -p android-package
           cp -a "$RUNNER_TEMP/SDL/android-project/." android-package/
           mkdir -p android-package/app/src/main/jniLibs/arm64-v8a
-          cp pacman_project/build-android/libpacman_colors.so android-package/app/libs/arm64-v8a/libmain.so
+          cp pacman_project/build-android/libpacman_colors.so android-package/app/src/main/jniLibs/arm64-v8a/libmain.so
           # SDLActivity loads SDL3 followed by the app's libmain.so. The
           # native CMake build must provide a shared SDL3 runtime when linked dynamically.
           SDL_LIB="$(find pacman_project/build-android "$RUNNER_TEMP/SDL" -type f -name 'libSDL3.so' -print -quit || true)"
           if [ -n "$SDL_LIB" ]; then
-            cp "$SDL_LIB" android-package/app/libs/arm64-v8a/libSDL3.so
+            cp "$SDL_LIB" android-package/app/src/main/jniLibs/arm64-v8a/libSDL3.so
           elif readelf -d pacman_project/build-android/libpacman_colors.so | grep -q 'libSDL3.so'; then
             echo "::error::libpacman_colors.so requires libSDL3.so, but no built SDL3 shared library was found."
             exit 1
