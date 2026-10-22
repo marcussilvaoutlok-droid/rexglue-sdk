@@ -22,17 +22,26 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Configurar Android SDK e NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar NDK
+      - name: Localizar Android SDK e NDK preinstalados
         run: |
           set -euo pipefail
-          sdkmanager "ndk;27.2.12479018"
-          NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
-          test -f "$NDK_PATH/build/cmake/android.toolchain.cmake"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          NDK_PATH="${ANDROID_NDK_HOME:-}"
+          if [ -z "$NDK_PATH" ] || [ ! -f "$NDK_PATH/build/cmake/android.toolchain.cmake" ]; then
+            NDK_PATH="$(find "$SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          if [ -z "$NDK_PATH" ] || [ ! -f "$NDK_PATH/build/cmake/android.toolchain.cmake" ]; then
+            echo "::error::Nenhum Android NDK preinstalado encontrado em $SDK_ROOT/ndk."
+            find "$SDK_ROOT" -maxdepth 4 -name android.toolchain.cmake -print 2>/dev/null || true
+            exit 1
+          fi
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_LATEST_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "Android SDK: $SDK_ROOT"
+          echo "Android NDK: $NDK_PATH"
 
       - name: Instalar dependencias
         run: |
