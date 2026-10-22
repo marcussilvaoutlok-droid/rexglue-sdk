@@ -19,6 +19,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+
 #include <rex/ui/windowed_app.h>
 #include <rex/ui/windowed_app_context_sdl.h>
 
@@ -55,7 +56,19 @@ int RunWindowedApp(int argc, char** argv) {
     }
 #endif
 
+#if REX_PLATFORM_ANDROID
+#ifndef REXGLUE_APP_NAME
+#error "REXGLUE_APP_NAME must identify the registered Android app"
+#endif
+    auto creator = rex::ui::WindowedApp::GetCreator(REXGLUE_APP_NAME);
+    if (!creator) {
+      REXLOG_ERROR("No registered ReXGlue Android app named '{}'", REXGLUE_APP_NAME);
+      return EXIT_FAILURE;
+    }
+    std::unique_ptr<rex::ui::WindowedApp> app = creator(app_context);
+#else
     std::unique_ptr<rex::ui::WindowedApp> app = rex::ui::GetWindowedAppCreator()(app_context);
+#endif
 
     // Match remaining positional args to the app's expected options.
     const auto& option_names = app->GetPositionalOptions();
@@ -102,7 +115,14 @@ std::vector<std::string> WideArgsToUtf8(int argc, wchar_t** wargv) {
 
 }  // namespace
 
-#if REX_PLATFORM_WIN32
+#if REX_PLATFORM_ANDROID
+
+// SDL's Android activity calls SDL_main after loading the native application library.
+extern "C" int SDL_main(int argc, char* argv[]) {
+  return RunWindowedApp(argc, argv);
+}
+
+#elif REX_PLATFORM_WIN32
 
 int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR command_line,
                     int show_cmd) {

@@ -2,9 +2,11 @@ name: Recompilar Pac-Man para Android
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
     branches:
       - main
+      - fix/missing-label-check
 
 permissions:
   contents: read
@@ -19,6 +21,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Localizar Android SDK e NDK preinstalados
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          NDK_PATH="${ANDROID_NDK_HOME:-}"
+          if [ -z "$NDK_PATH" ] || [ ! -f "$NDK_PATH/build/cmake/android.toolchain.cmake" ]; then
+            NDK_PATH="$(find "$SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          if [ -z "$NDK_PATH" ] || [ ! -f "$NDK_PATH/build/cmake/android.toolchain.cmake" ]; then
+            echo "::error::Nenhum Android NDK preinstalado encontrado em $SDK_ROOT/ndk."
+            find "$SDK_ROOT" -maxdepth 4 -name android.toolchain.cmake -print 2>/dev/null || true
+            exit 1
+          fi
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_LATEST_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "Android SDK: $SDK_ROOT"
+          echo "Android NDK: $NDK_PATH"
 
       - name: Instalar dependencias
         run: |
@@ -100,22 +123,20 @@ jobs:
           find out -type f -name rexglue \
             -perm /111 -print || true
 
-          if [ -x "out/linux-amd64/Release/rexglue" ]; then
-            REXGLUE_BIN="$GITHUB_WORKSPACE/out/linux-amd64/Release/rexglue"
-          elif [ -x "out/linux-amd64/rexglue" ]; then
-            REXGLUE_BIN="$GITHUB_WORKSPACE/out/linux-amd64/rexglue"
-          else
-            echo "::error::Executavel rexglue x86-64 nao encontrado em out/linux-amd64."
-            echo "Arquivos encontrados:"
-            find out/linux-amd64 -type f -name rexglue -print 2>/dev/null || true
+          # Find the actual executable produced by the preset; do not assume
+          # a single output layout across Ninja Multi-Config versions.
+          REXGLUE_SOURCE="$(find out -type f -name rexglue -perm /111 -print -quit)"
+          if [ -z "$REXGLUE_SOURCE" ]; then
+            echo "::error::Executavel ReXGlue host nao encontrado."
+            find out -type f -name 'rexglue*' -print || true
             exit 1
           fi
 
-          # Guarde a ferramenta host fora do workspace para que o CMake Android
-          # nao possa sobrescreve-la ao compilar o alvo rexglue.
-          REXGLUE_BIN="$RUNNER_TEMP/rexglue-host"
-          cp "$GITHUB_WORKSPACE/out/linux-amd64/Release/rexglue" "$REXGLUE_BIN" 2>/dev/null || cp "$GITHUB_WORKSPACE/out/linux-amd64/rexglue" "$REXGLUE_BIN"
-          chmod +x "$REXGLUE_BIN"
+          # Keep a native host executable outside the SDK build tree.
+          REXGLUE_BIN="$RUNNER_TEMP/rexglue-host-linux"
+          install -m 0755 "$REXGLUE_SOURCE" "$REXGLUE_BIN"
+          file "$REXGLUE_BIN"
+          "$REXGLUE_BIN" --help
           echo "REXGLUE_BIN=$REXGLUE_BIN" >> "$GITHUB_ENV"
 
           echo "=== Versao e ajuda do ReXGlue (host x86-64) ==="
@@ -193,6 +214,9 @@ jobs:
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-26 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_CXX_FLAGS="-std=c++23 -I$GITHUB_WORKSPACE/out/install/linux-amd64/include" \
             -DREXSDK_DIR="$GITHUB_WORKSPACE"
 
           echo "=== Ajustando somente o comando de codegen ==="
@@ -239,6 +263,68 @@ jobs:
 
           echo "=== Compilando biblioteca Android ==="
           cmake --build build-android --config Release
+
+      - name: Validar e preparar biblioteca nativa Android ARM64
+        run: |
+          set -euo pipefail
+          LIB="pacman_project/build-android/libpacman_colors.so"
+          test -s "$LIB"
+          mkdir -p dist/android-arm64
+          file "$LIB" | tee dist/android-arm64/file.txt
+          readelf -h "$LIB" | tee dist/android-arm64/elf-header.txt
+          readelf -d "$LIB" | tee dist/android-arm64/elf-dependencies.txt
+          readelf -h "$LIB" | grep -q 'Machine:.*AArch64'
+          cp "$LIB" dist/android-arm64/
+          cat > dist/android-arm64/README.txt <<'EOF'
+          Pac-Man ReXGlue Android ARM64 native shared library.
+          This is a native .so build artifact, not a standalone installable APK.
+          An Android application wrapper and runtime dependency packaging are still required.
+          EOF
+
+      - name: Preparar projeto Android SDL3 para empacotamento
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch release-3.4.x https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
+          mkdir -p android-package
+          cp -a "$RUNNER_TEMP/SDL/android-project/." android-package/
+          mkdir -p android-package/app/src/main/jniLibs/arm64-v8a
+          cp pacman_project/build-android/libpacman_colors.so android-package/app/src/main/jniLibs/arm64-v8a/libmain.so
+          # SDLActivity loads SDL3 followed by the app's libmain.so. The
+          # native CMake build must provide a shared SDL3 runtime when linked dynamically.
+          SDL_LIB="$(find pacman_project/build-android "$RUNNER_TEMP/SDL" -type f -name 'libSDL3.so' -print -quit || true)"
+          if [ -n "$SDL_LIB" ]; then
+            cp "$SDL_LIB" android-package/app/src/main/jniLibs/arm64-v8a/libSDL3.so
+          elif readelf -d pacman_project/build-android/libpacman_colors.so | grep -q 'libSDL3.so'; then
+            echo "::error::libpacman_colors.so requires libSDL3.so, but no built SDL3 shared library was found."
+            exit 1
+          fi
+          # Build the official SDL Android Gradle wrapper using prebuilt native libraries.
+          sed -i 's/android:label="@string\\/app_name"/android:label="Pac-Man ReXGlue"/' android-package/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="@string\\/app_name"/android:label="Pac-Man ReXGlue"/' android-package/app/src/main/AndroidManifest.xml || true
+          cd android-package
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug -PEXCLUDE_NATIVE_LIBS
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          mkdir -p ../dist/android-apk
+          cp "$APK" ../dist/android-apk/pacman-rexglue-debug.apk
+          unzip -l ../dist/android-apk/pacman-rexglue-debug.apk | grep -E 'lib/arm64-v8a/(libmain|libSDL3)\\.so'
+
+      - name: Publicar APK Android ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacman-android-arm64-apk
+          path: dist/android-apk/pacman-rexglue-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publicar biblioteca nativa Android ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacman-android-arm64-native
+          path: dist/android-arm64/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Preparar diagnosticos compactos
         if: always()

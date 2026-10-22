@@ -33,8 +33,14 @@ bool build_b(BuilderContext& ctx) {
 
   switch (kind) {
     case TargetKind::InternalLabel:
-      // Target is within this function and not another function's entry point
-      ctx.println("\tgoto loc_{:X};", target);
+      // Only emit a goto when codegen will emit the exact target label.
+      if (ctx.fn.isLabel(target)) {
+        ctx.println("\tgoto loc_{:X};", target);
+      } else {
+        REXCODEGEN_WARN("Unresolved b target 0x{:08X} from 0x{:08X}", target, ctx.base);
+        ctx.emit_function_call(target);
+        ctx.println("\treturn;");
+      }
       break;
 
     case TargetKind::Function:
@@ -47,7 +53,7 @@ bool build_b(BuilderContext& ctx) {
     case TargetKind::Unknown:
       // Only branch to an address backed by discovered code blocks. The overall
       // function extent can include gaps, where no loc_* label is emitted.
-      if (ctx.fn.containsAddress(target)) {
+      if (ctx.fn.isLabel(target)) {
         ctx.println("\tgoto loc_{:X};", target);
       } else {
         REXCODEGEN_WARN("Unresolved b target 0x{:08X} from 0x{:08X}", target, ctx.base);
@@ -72,9 +78,15 @@ bool build_bl(BuilderContext& ctx) {
 
   switch (kind) {
     case TargetKind::InternalLabel:
-      // PIC code pattern - bl to get PC into LR, treat as local jump
-      // LR is already set above, now jump to the target
-      ctx.println("\tgoto loc_{:X};", target);
+      // PIC code pattern - bl to get PC into LR, treat as local jump.
+      // Avoid emitting a goto to a label absent from generated code.
+      if (ctx.fn.isLabel(target)) {
+        ctx.println("\tgoto loc_{:X};", target);
+      } else {
+        REXCODEGEN_WARN("Unresolved local bl target 0x{:08X} from 0x{:08X}", target, ctx.base);
+        ctx.emit_function_call(target);
+        ctx.csrState = CSRState::Unknown;
+      }
       break;
 
     case TargetKind::Function:
@@ -142,7 +154,12 @@ bool build_bctr(BuilderContext& ctx) {
       auto kind = ctx.graph().classifyTarget(label, ctx.base, false);
       switch (kind) {
         case TargetKind::InternalLabel:
-          ctx.println("\t\tgoto loc_{:X};", label);
+          if (ctx.fn.isLabel(label)) {
+            ctx.println("\t\tgoto loc_{:X};", label);
+          } else {
+            REXCODEGEN_ERROR("Missing jump label at bctr 0x{:08X}", ctx.base);
+            ctx.println("\t\tREX_FATAL(\"Missing jump label at bctr 0x{:08X}\");", ctx.base);
+          }
           break;
         case TargetKind::Function:
         case TargetKind::Import:
